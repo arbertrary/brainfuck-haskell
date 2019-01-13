@@ -1,3 +1,5 @@
+{-# LANGUAGE TemplateHaskell #-}
+
 module Lib
   ( ValidationResult(TooManyClosed, TooManyOpen, Fine, NoCode)
   , validateBrackets
@@ -16,14 +18,17 @@ module Lib
   , partitionByFinding
   ) where
 
+import Control.Lens
 import Data.Char (chr, ord)
 import Data.List (intercalate, intersperse)
 
 data Tape = Tape
-  { left :: [Int]
-  , curr :: Int
-  , right :: [Int]
+  { _left :: [Int]
+  , _curr :: Int
+  , _right :: [Int]
   } deriving (Eq)
+
+makeLenses ''Tape
 
 instance Show Tape where
   show (Tape l c r) = show $ "[" ++ l' ++ "|>>" ++ show c ++ "<<|" ++ r' ++ "]"
@@ -35,15 +40,19 @@ emptyTape :: Tape
 emptyTape = Tape [] 0 []
 
 moveLeft :: Tape -> Tape
-moveLeft Tape {curr = rh, left = [], right = r} = Tape [] 0 (rh : r)
-moveLeft Tape {curr = rh, left = c:l, right = r} = Tape l c (rh : r)
+moveLeft t@Tape {_left = [], _curr = rh, _right = r} =
+  t & left .~ [] & curr .~ 0 & right .~ (rh : r)
+moveLeft t@Tape {_left = c:l, _curr = rh, _right = r} =
+  t & left .~ l & curr .~ c & right .~ rh : r
 
 moveRight :: Tape -> Tape
-moveRight Tape {curr = lh, left = l, right = []} = Tape (lh : l) 0 []
-moveRight Tape {curr = lh, left = l, right = c:r} = Tape (lh : l) c r
+moveRight t@Tape {_left = l, _curr = lh, _right = []} =
+  t & left .~ (lh : l) & curr .~ 0 & right .~ []
+moveRight t@Tape {_left = l, _curr = lh, _right = c:r} =
+  t & left .~ (lh : l) & curr .~ c & right .~ r
 
 increment :: Tape -> Tape
-increment t = t {curr = incrWithOverflow $ curr t}
+increment t = t & curr .~ incrWithOverflow (t ^. curr)
   where
     incrWithOverflow i =
       if i == 255
@@ -51,7 +60,7 @@ increment t = t {curr = incrWithOverflow $ curr t}
         else i + 1
 
 decrement :: Tape -> Tape
-decrement t = t {curr = decrWithOverflow $ curr t}
+decrement t = t & curr .~ decrWithOverflow (t ^. curr)
   where
     decrWithOverflow i =
       if i == 0
@@ -59,10 +68,10 @@ decrement t = t {curr = decrWithOverflow $ curr t}
         else i - 1
 
 readChar :: Tape -> Char
-readChar Tape {curr = c} = chr c
+readChar tape = chr $ tape ^. curr
 
 writeChar :: Tape -> Char -> Tape
-writeChar t c = t {curr = ord c}
+writeChar tape c = tape & curr .~ ord c
 
 data ValidationResult
   = TooManyOpen
@@ -113,14 +122,14 @@ interpretCode code input = go (InterpreterState code "" input "" emptyTape)
     go s@(InterpreterState (c:code) seen inp out t) =
       case c of
         '[' ->
-          if curr t == 0
+          if t ^. curr == 0
             -- skip whole loop
             then go s {code = todo, seen = loop ++ ('[' : seen)}
             -- go into loop
             else go s {code = code, seen = '[' : seen}
           where (loop, todo) = partitionByFinding ']' code
         ']' ->
-          if curr t == 0
+          if t ^. curr == 0
             -- exit loop
             then go s {code = code, seen = ']' : seen}
             -- go back to loop start
